@@ -3,6 +3,9 @@
 RAG-based Student Work Auto-Grader (Streamlit) - Enhanced UX Version
 Applying HCI Principles: Progressive Disclosure, Immediate Feedback, Clear Affordances, etc.
 """
+import pandas as pd
+from io import BytesIO
+
 # Optional PDF import
 try:
     import pdfplumber
@@ -118,6 +121,62 @@ embedding_model = load_embedding_model()
 # ---------------------------
 # Enhanced Utilities with Progress Indicators
 # ---------------------------
+
+def export_results_to_excel(results: list) -> bytes:
+    """
+    Convert grading results into a multi-sheet Excel file.
+    """
+    summary_rows = []
+    breakdown_rows = []
+    grammar_rows = []
+
+    for r in results:
+        # -------- Summary Sheet --------
+        summary_rows.append({
+            "Student Name": r.get("name"),
+            "Final Score": r.get("final_score"),
+            "Similarity (%)": round(r.get("details", {}).get("similarity", 0) * 100, 2),
+            "Grammar Issues": r.get("details", {}).get("grammar", {}).get("issues_count"),
+            "Grading Method": r.get("details", {}).get("grading_method"),
+            "Timestamp": r.get("timestamp")
+        })
+
+        # -------- Breakdown Sheet --------
+        for b in r.get("details", {}).get("breakdown", []):
+            breakdown_rows.append({
+                "Student Name": r.get("name"),
+                "Criterion": b.get("criterion"),
+                "Weight": b.get("weight"),
+                "Subscore": b.get("subscore"),
+                "Type": b.get("type")
+            })
+
+        # -------- Grammar Sheet --------
+        grammar = r.get("details", {}).get("grammar", {})
+        if grammar.get("available"):
+            for g in grammar.get("examples", []):
+                grammar_rows.append({
+                    "Student Name": r.get("name"),
+                    "Issue": g.get("message"),
+                    "Context": g.get("context"),
+                    "Suggestions": ", ".join(g.get("suggestions", []))
+                })
+
+    # Create DataFrames
+    df_summary = pd.DataFrame(summary_rows)
+    df_breakdown = pd.DataFrame(breakdown_rows)
+    df_grammar = pd.DataFrame(grammar_rows)
+
+    # Write to Excel in-memory
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df_summary.to_excel(writer, index=False, sheet_name="Summary")
+        df_breakdown.to_excel(writer, index=False, sheet_name="Score Breakdown")
+        if not df_grammar.empty:
+            df_grammar.to_excel(writer, index=False, sheet_name="Grammar Issues")
+
+    return output.getvalue()
+
 def read_text_file(uploaded_file) -> str:
     if uploaded_file is None:
         return ""
@@ -557,17 +616,16 @@ with tab3:
             
             # Export results
             st.markdown("#### Export Results")
-            if st.button("📤 Export Results as JSON"):
-                export_data = {
-                    "timestamp": datetime.now().isoformat(),
-                    "results": st.session_state.results
-                }
+            if st.button("📤 Export Results as Excel"):
+                excel_bytes = export_results_to_excel(st.session_state.results)
+            
                 st.download_button(
-                    label="⬇️ Download JSON",
-                    data=json.dumps(export_data, indent=2),
-                    file_name=f"grading_results_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-                    mime="application/json"
+                    label="⬇️ Download Excel (.xlsx)",
+                    data=excel_bytes,
+                    file_name=f"grading_results_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+
 
 # ==================== GRADING EXECUTION ====================
 if grade_button:
