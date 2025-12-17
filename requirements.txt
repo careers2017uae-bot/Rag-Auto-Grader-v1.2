@@ -15,4 +15,6 @@ language-tool-python>=2.7.1
 # HTTP & utilities
 requests>=2.31.0
 
+pandas
+openpyxl
 groq
