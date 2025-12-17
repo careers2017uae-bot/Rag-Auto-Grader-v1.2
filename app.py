@@ -122,6 +122,44 @@ embedding_model = load_embedding_model()
 # Enhanced Utilities with Progress Indicators
 # ---------------------------
 
+def parse_teacher_rubric(text: str) -> Optional[dict]:
+    """
+    Convert teacher-friendly rubric table into internal rubric JSON.
+    Expected format:
+    Criterion | Weight | Description
+    """
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if len(lines) < 2:
+        return None
+
+    criteria = []
+
+    for line in lines[1:]:  # skip header
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 2:
+            continue
+
+        name = parts[0]
+        try:
+            weight = float(parts[1])
+        except:
+            weight = 0
+
+        criterion_type = "grammar_penalty" if "grammar" in name.lower() else "similarity"
+
+        criteria.append({
+            "name": name,
+            "weight": weight,
+            "type": criterion_type
+        })
+
+    if not criteria:
+        return None
+
+    return {"criteria": criteria}
+
+
+
 def export_results_to_excel(results: list) -> bytes:
     """
     Convert grading results into a multi-sheet Excel file.
@@ -493,17 +531,25 @@ with tab1:
         )
         
         st.markdown("#### 📊 Grading Rubric (Optional)")
+
         rubric_file = st.file_uploader(
-            "Upload rubric JSON", 
-            type=["json"],
-            help="Upload a JSON file with custom grading criteria"
+            "Upload rubric file (TXT, DOCX, PDF)",
+            type=["txt", "docx", "pdf"],
+            help="Upload a simple table or grid-based rubric (no JSON needed)"
         )
+        
         rubric_text_paste = st.text_area(
-            "Or paste rubric JSON here", 
-            height=140,
-            placeholder='Paste rubric JSON here. Example: {"criteria": [{"name": "Content", "weight": 0.7, "type": "similarity"}]}',
-            help="Define custom grading criteria with weights and types"
+            "Or paste rubric here",
+            height=160,
+            placeholder="""
+        Criterion | Weight | Description
+        Content Accuracy | 50 | Covers key concepts correctly
+        Organization | 30 | Logical structure and flow
+        Grammar | 20 | Grammar, spelling, sentence clarity
+        """,
+            help="Use a simple table format separated by |"
         )
+
     
     # Action button with clear visual hierarchy
     st.markdown("---")
@@ -643,14 +689,16 @@ if grade_button:
     
     # Process rubric
     rubric_obj = None
-    rubric_text = rubric_text_paste.strip() if rubric_text_paste.strip() else ""
+
+    rubric_text = rubric_text_paste.strip()
     if not rubric_text and rubric_file:
-        rubric_text = rubric_file.getvalue().decode("utf-8")
+        rubric_text = read_text_file(rubric_file)
+    
     if rubric_text:
-        rubric_obj = safe_load_json(rubric_text)
+        rubric_obj = parse_teacher_rubric(rubric_text)
         if rubric_obj is None:
-            st.error("❌ Invalid rubric JSON format. Please check your JSON syntax.")
-            st.stop()
+            st.warning("⚠️ Rubric detected but could not be parsed. Default grading will be used.")
+
     
     # Process student submissions
     student_texts = []
