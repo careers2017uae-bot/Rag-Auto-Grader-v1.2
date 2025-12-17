@@ -122,41 +122,239 @@ embedding_model = load_embedding_model()
 # Enhanced Utilities with Progress Indicators
 # ---------------------------
 
+# Replace the entire parse_teacher_rubric function with this improved version:
 def parse_teacher_rubric(text: str) -> Optional[dict]:
     """
     Convert teacher-friendly rubric table into internal rubric JSON.
-    Expected format:
+    Expected format (flexible):
     Criterion | Weight | Description
+    or
+    Criterion, Weight, Description
     """
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    if not text or not text.strip():
+        return None
+    
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
     if len(lines) < 2:
         return None
-
+    
     criteria = []
-
-    for line in lines[1:]:  # skip header
-        parts = [p.strip() for p in line.split("|")]
+    line_count = 0
+    
+    # Try different delimiters
+    for line in lines:
+        line_count += 1
+        
+        # Skip header lines that don't contain numbers
+        if line_count == 1:
+            # Check if this looks like a header (contains words like criterion, weight, description)
+            header_words = ['criterion', 'weight', 'description', 'criteria', 'score', 'points']
+            if any(word in line.lower() for word in header_words):
+                continue
+        
+        # Try pipe delimiter first, then comma, then tab
+        if '|' in line:
+            parts = [p.strip() for p in line.split('|')]
+        elif ',' in line:
+            parts = [p.strip() for p in line.split(',')]
+        elif '\t' in line:
+            parts = [p.strip() for p in line.split('\t')]
+        else:
+            # Try splitting by 2 or more spaces
+            parts = [p.strip() for p in line.split('  ') if p.strip()]
+        
         if len(parts) < 2:
             continue
-
+        
         name = parts[0]
-        try:
-            weight = float(parts[1])
-        except:
-            weight = 0
-
+        if not name:
+            continue
+        
+        # Extract weight - try to find a number in the parts
+        weight = 0
+        for part in parts[1:]:
+            # Look for numbers in the part
+            try:
+                # Remove any non-numeric characters except decimal point
+                import re
+                weight_str = re.sub(r'[^\d.]', '', part)
+                if weight_str:
+                    weight = float(weight_str)
+                    break
+            except:
+                continue
+        
+        # Determine criterion type
         criterion_type = "grammar_penalty" if "grammar" in name.lower() else "similarity"
-
+        
         criteria.append({
             "name": name,
             "weight": weight,
-            "type": criterion_type
+            "type": criterion_type,
+            "penalty_per_issue": 1.5 if "grammar" in name.lower() else 0
         })
-
+    
     if not criteria:
         return None
-
+    
+    # Normalize weights so they sum to 1.0
+    total_weight = sum(c.get("weight", 0) for c in criteria)
+    if total_weight > 0:
+        for criterion in criteria:
+            criterion["weight"] = criterion["weight"] / total_weight
+    
     return {"criteria": criteria}
+
+# Also update the rubric parsing in the main execution section (around line 381):
+# Replace the rubric processing section with this:
+
+    # Process rubric with better error handling
+    rubric_obj = None
+    rubric_text = rubric_text_paste.strip()
+    if not rubric_text and rubric_file:
+        rubric_text = read_text_file(rubric_file)
+    
+    if rubric_text:
+        with st.status("📊 Parsing rubric...", state="running") as status:
+            rubric_obj = parse_teacher_rubric(rubbaric_text)
+            if rubric_obj:
+                # Show parsed rubric for verification
+                st.session_state.parsed_rubric = rubric_obj
+                status.update(label=f"✅ Rubric parsed: {len(rubric_obj.get('criteria', []))} criteria", state="complete")
+                
+                # Show the parsed rubric in an expander
+                with st.expander("📋 View Parsed Rubric", expanded=False):
+                    for i, criterion in enumerate(rubric_obj.get('criteria', [])):
+                        st.write(f"**{i+1}. {criterion['name']}**")
+                        st.write(f"   Weight: {criterion['weight']:.2%}")
+                        st.write(f"   Type: {criterion['type']}")
+                        if criterion['type'] == 'grammar_penalty':
+                            st.write(f"   Penalty per issue: {criterion.get('penalty_per_issue', 1.5)} points")
+                        st.write("---")
+            else:
+                status.update(label="⚠️ Could not parse rubric. Using default grading.", state="error")
+                st.warning("Could not parse the rubric. Please check the format and try again.")
+
+# Update the apply_rubric_json function with better logic:
+def apply_rubric_json(rubric: dict, model_ans: str, student_ans: str) -> Dict[str, Any]:
+    """Apply rubric-based grading with proper weight distribution."""
+    criteria = rubric.get("criteria", [])
+    if not criteria:
+        return heuristic_grade(model_ans, student_ans)
+    
+    with st.status("📊 Applying rubric criteria...", state="running") as status:
+        # Calculate similarity
+        vecs = embed_texts([model_ans, student_ans])
+        similarity_score = cosine_sim(vecs[0], vecs[1])
+        similarity_percent = max(0.0, min((similarity_score + 1) / 2.0, 1.0)) * 100
+        
+        # Grammar check
+        grammar_result = grammar_check(student_ans)
+        grammar_issues = grammar_result.get("issues_count", 0) if grammar_result.get("available") else 0
+        
+        total_score = 0.0
+        breakdown = []
+        
+        for i, criterion in enumerate(criteria):
+            name = criterion.get("name", f"Criterion {i+1}")
+            weight = criterion.get("weight", 0)
+            criterion_type = criterion.get("type", "similarity")
+            penalty_per_issue = criterion.get("penalty_per_issue", 1.5)
+            
+            subscore = 0.0
+            
+            if criterion_type == "similarity":
+                subscore = similarity_percent
+            elif criterion_type == "grammar_penalty":
+                if grammar_result.get("available"):
+                    # Apply penalty: start from 100 and subtract for each issue
+                    subscore = max(0.0, 100.0 - (grammar_issues * penalty_per_issue))
+                else:
+                    subscore = 100.0  # Full points if grammar check not available
+            else:
+                # Default to similarity for unknown types
+                subscore = similarity_percent
+            
+            # Apply weighting
+            weighted_score = subscore * weight
+            total_score += weighted_score
+            
+            breakdown.append({
+                "criterion": name,
+                "weight": round(weight, 4),
+                "subscore": round(subscore, 2),
+                "type": criterion_type,
+                "weighted_score": round(weighted_score, 2)
+            })
+        
+        # Ensure total_score doesn't exceed 100
+        total_score = min(100.0, total_score)
+        
+        status.update(label="✅ Rubric applied successfully", state="complete")
+    
+    return {
+        "final_score": round(total_score, 2),
+        "breakdown": breakdown,
+        "similarity": similarity_percent / 100.0,
+        "grammar": grammar_result,
+        "grading_method": "rubric"
+    }
+
+# Also update the rubric display section (around line 186) for better UX:
+with col2:
+    st.markdown("#### 📊 Grading Rubric (Optional)")
+    
+    # Add examples and format guidance
+    with st.expander("📝 How to format your rubric"):
+        st.markdown("""
+        **Simple format (pipe-separated):**
+        ```
+        Criterion | Weight | Description
+        Content Accuracy | 50 | Covers key concepts correctly
+        Organization | 30 | Logical structure and flow
+        Grammar | 20 | Grammar, spelling, sentence clarity
+        ```
+        
+        **Alternative format (comma-separated):**
+        ```
+        Criterion, Weight, Description
+        Content Accuracy, 50, Covers key concepts correctly
+        Organization, 30, Logical structure and flow
+        Grammar, 20, Grammar, spelling, sentence clarity
+        ```
+        
+        **Tips:**
+        - Weights can sum to 100 or any number (they'll be normalized)
+        - Grammar criteria will apply penalty for each issue found
+        - Other criteria use content similarity
+        """)
+    
+    rubric_file = st.file_uploader(
+        "Upload rubric file (TXT, DOCX, PDF)",
+        type=["txt", "docx", "pdf"],
+        help="Upload a simple table or grid-based rubric"
+    )
+    
+    rubric_text_paste = st.text_area(
+        "Or paste rubric here",
+        height=160,
+        value="""Criterion | Weight | Description
+Content Accuracy | 50 | Covers key concepts correctly
+Organization | 30 | Logical structure and flow
+Grammar | 20 | Grammar, spelling, sentence clarity""",
+        help="Use a simple table format"
+    )
+    
+    # Add a preview button
+    if st.button("🔍 Preview Rubric", type="secondary"):
+        if rubric_text_paste.strip():
+            parsed = parse_teacher_rubric(rubric_text_paste.strip())
+            if parsed:
+                st.success("✅ Rubric format is valid!")
+                with st.expander("View parsed structure"):
+                    st.json(parsed)
+            else:
+                st.error("❌ Could not parse rubric. Check the format.")
 
 
 
