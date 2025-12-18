@@ -300,61 +300,6 @@ def apply_rubric_json(rubric: dict, model_ans: str, student_ans: str) -> Dict[st
         "grading_method": "rubric"
     }
 
-# Also update the rubric display section (around line 186) for better UX:
-with col2:
-    st.markdown("#### 📊 Grading Rubric (Optional)")
-    
-    # Add examples and format guidance
-    with st.expander("📝 How to format your rubric"):
-        st.markdown("""
-        **Simple format (pipe-separated):**
-        ```
-        Criterion | Weight | Description
-        Content Accuracy | 50 | Covers key concepts correctly
-        Organization | 30 | Logical structure and flow
-        Grammar | 20 | Grammar, spelling, sentence clarity
-        ```
-        
-        **Alternative format (comma-separated):**
-        ```
-        Criterion, Weight, Description
-        Content Accuracy, 50, Covers key concepts correctly
-        Organization, 30, Logical structure and flow
-        Grammar, 20, Grammar, spelling, sentence clarity
-        ```
-        
-        **Tips:**
-        - Weights can sum to 100 or any number (they'll be normalized)
-        - Grammar criteria will apply penalty for each issue found
-        - Other criteria use content similarity
-        """)
-    
-    rubric_file = st.file_uploader(
-        "Upload rubric file (TXT, DOCX, PDF)",
-        type=["txt", "docx", "pdf"],
-        help="Upload a simple table or grid-based rubric"
-    )
-    
-    rubric_text_paste = st.text_area(
-        "Or paste rubric here",
-        height=160,
-        value="""Criterion | Weight | Description
-Content Accuracy | 50 | Covers key concepts correctly
-Organization | 30 | Logical structure and flow
-Grammar | 20 | Grammar, spelling, sentence clarity""",
-        help="Use a simple table format"
-    )
-    
-    # Add a preview button
-    if st.button("🔍 Preview Rubric", type="secondary"):
-        if rubric_text_paste.strip():
-            parsed = parse_teacher_rubric(rubric_text_paste.strip())
-            if parsed:
-                st.success("✅ Rubric format is valid!")
-                with st.expander("View parsed structure"):
-                    st.json(parsed)
-            else:
-                st.error("❌ Could not parse rubric. Check the format.")
 
 
 
@@ -717,36 +662,23 @@ with tab1:
     with col2:
         st.markdown("#### 📖 Model Solution")
         model_file = st.file_uploader(
-            "Upload model solution", 
-            type=["txt","docx", "pdf"],
+            "Upload model solution",
+            type=["txt","docx","pdf"],
             help="The ideal answer or reference solution for comparison"
         )
         model_text_paste = st.text_area(
-            "Or paste model solution here", 
+            "Or paste model solution here",
             height=120,
-            placeholder="Paste the model answer or ideal solution here...",
-            help="This will be used as the benchmark for grading"
+            placeholder="Paste the model answer or ideal solution here..."
         )
-        
+    
         st.markdown("#### 📊 Grading Rubric (Optional)")
+    
+        with st.expander("📝 How to format your rubric"):
+            st.markdown("""
+    **Pipe-separated format:**
 
-        rubric_file = st.file_uploader(
-            "Upload rubric file (TXT, DOCX, PDF)",
-            type=["txt", "docx", "pdf"],
-            help="Upload a simple table or grid-based rubric (no JSON needed)"
-        )
         
-        rubric_text_paste = st.text_area(
-            "Or paste rubric here",
-            height=160,
-            placeholder="""
-        Criterion | Weight | Description
-        Content Accuracy | 50 | Covers key concepts correctly
-        Organization | 30 | Logical structure and flow
-        Grammar | 20 | Grammar, spelling, sentence clarity
-        """,
-            help="Use a simple table format separated by |"
-        )
 
     
     # Action button with clear visual hierarchy
