@@ -677,6 +677,36 @@ with tab1:
         with st.expander("📝 How to format your rubric"):
             st.markdown("""
     **Pipe-separated format:**
+            Criterion | Weight | Description
+            Content Accuracy | 50 | Covers key concepts correctly
+            Organization | 30 | Logical structure and flow
+            Grammar | 20 | Grammar, spelling, clarity
+    
+    **Comma-separated format also works.**
+    Weights are auto-normalized.
+            """)
+    
+        rubric_file = st.file_uploader(
+            "Upload rubric file (TXT, DOCX, PDF)",
+            type=["txt", "docx", "pdf"]
+        )
+    
+        rubric_text_paste = st.text_area(
+            "Or paste rubric here",
+            height=160,
+            value="""Criterion | Weight | Description
+    Content Accuracy | 50 | Covers key concepts correctly
+    Organization | 30 | Logical structure and flow
+    Grammar | 20 | Grammar, spelling, sentence clarity"""
+        )
+    
+        if st.button("🔍 Preview Rubric", type="secondary"):
+            parsed = parse_teacher_rubric(rubric_text_paste.strip())
+            if parsed:
+                st.success("✅ Rubric parsed successfully")
+                st.json(parsed)
+            else:
+                st.error("❌ Could not parse rubric")
 
         
 
